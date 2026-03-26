@@ -517,6 +517,22 @@ client.upload_files("thread-1", ["./report.pdf"])  # {"success": True, "files": 
 
 All dict-returning methods are validated against Gateway Pydantic response models in CI (`TestGatewayConformance`), ensuring the embedded client stays in sync with the HTTP API schemas. See `backend/packages/harness/deerflow/client.py` for full API documentation.
 
+## Known Limitations
+
+### Single-Worker Queue in Development Mode
+
+The `langgraph dev` server uses a single background worker with a shared event loop. When a long-running agent execution is in progress (e.g., subagents with multi-step tool calls or summarization retries), new chat requests are enqueued and may appear to hang until the previous run completes or times out.
+
+**Symptoms:** New chat messages show a spinner indefinitely while a previous conversation is still processing in the background.
+
+**Mitigations:**
+- Subagent timeout is set to 180 seconds (configurable via `subagents.timeout_seconds` in `config.yaml`)
+- Wait for the current run to finish (check the stop button) before starting a new chat
+- If a chat appears stuck, stop the current run and try again
+- The `--n-jobs-per-worker` flag (default: 10) controls concurrent jobs per worker but does not help when blocking I/O ties up the shared event loop
+
+This is a limitation of the LangGraph development server (`langgraph dev`). Production deployments using LangGraph Cloud or `langgraph up` support multiple workers and isolated event loops.
+
 ## Documentation
 
 - [Contributing Guide](CONTRIBUTING.md) - Development environment setup and workflow

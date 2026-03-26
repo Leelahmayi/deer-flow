@@ -319,15 +319,16 @@ sandbox:
 # Subagents are background workers delegated tasks by the lead agent
 
 # subagents:
-#   # Default timeout in seconds for all subagents (default: 900 = 15 minutes)
-#   timeout_seconds: 900
+#   # Default timeout in seconds for all subagents (default: 180 = 3 minutes)
+#   # Lower values reduce queue blocking in the single-worker dev server.
+#   timeout_seconds: 180
 #
 #   # Optional per-agent timeout overrides
 #   agents:
 #     general-purpose:
-#       timeout_seconds: 1800  # 30 minutes for complex multi-step tasks
+#       timeout_seconds: 300   # 5 minutes for complex multi-step tasks
 #     bash:
-#       timeout_seconds: 300   # 5 minutes for quick command execution
+#       timeout_seconds: 120   # 2 minutes for quick command execution
 
 # ============================================================================
 # Skills Configuration
