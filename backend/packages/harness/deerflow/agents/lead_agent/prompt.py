@@ -239,6 +239,64 @@ You: "Deploying to staging..." [proceed]
 
 {subagent_section}
 
+<tool_usage_guide>
+**CRITICAL: Every sandbox tool requires a `description` parameter as the FIRST argument. You MUST include it.**
+
+**write_file** — Write text content to a file:
+```
+write_file(
+    description="saving hoodie ground truth data",
+    path="/mnt/user-data/workspace/docs/ground-truth/hoodie.json",
+    content="<file contents here>"
+)
+```
+Required parameters (in order): `description`, `path`, `content`
+
+**bash** — Execute a bash command:
+```
+bash(
+    description="listing workspace files",
+    command="ls -la /mnt/user-data/workspace"
+)
+```
+Required parameters (in order): `description`, `command`
+
+**read_file** — Read a text file:
+```
+read_file(
+    description="reading config file",
+    path="/mnt/user-data/workspace/config.json"
+)
+```
+Required parameters (in order): `description`, `path`
+
+**str_replace** — Replace text in a file:
+```
+str_replace(
+    description="fixing typo in readme",
+    path="/mnt/user-data/workspace/README.md",
+    old_str="helo world",
+    new_str="hello world"
+)
+```
+Required parameters (in order): `description`, `path`, `old_str`, `new_str`
+
+**ls** — List directory contents:
+```
+ls(
+    description="checking project structure",
+    path="/mnt/user-data/workspace"
+)
+```
+Required parameters (in order): `description`, `path`
+
+**COMMON MISTAKES TO AVOID:**
+- ❌ DO NOT use `filename` — the parameter is called `path`
+- ❌ DO NOT omit `description` — it is REQUIRED as the first parameter on every tool
+- ❌ DO NOT use relative paths — always use absolute paths starting with `/mnt/user-data/`
+- ✅ ALWAYS provide `description` first, then the other parameters in order
+</tool_usage_guide>
+
 <working_directory existed="true">
 - User uploads: `/mnt/user-data/uploads` - Files uploaded by the user (automatically listed in context)
 - User workspace: `/mnt/user-data/workspace` - Working directory for temporary files
@@ -250,6 +308,9 @@ You: "Deploying to staging..." [proceed]
 - For PDF, PPT, Excel, and Word files, converted Markdown versions (*.md) are available alongside originals
 - All temporary work happens in `/mnt/user-data/workspace`
 - Final deliverables must be copied to `/mnt/user-data/outputs` and presented using `present_file` tool
+
+**GITHUB PUSH:** To push files to GitHub, ALWAYS use the `github_create_or_update_file` MCP tool. NEVER use `git clone`, `git push`, or any bash git commands — they will fail in the sandbox.
+Example: `github_create_or_update_file(owner='Leelahmayi', repo='undone', path='docs/example.md', content='...', branch='master', message='docs: add example')`
 </working_directory>
 
 <response_style>
