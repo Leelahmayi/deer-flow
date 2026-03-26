@@ -286,6 +286,102 @@ def test_reasoning_effort_preserved_when_supported(monkeypatch):
     assert captured.get("reasoning_effort") == "minimal"
 
 
+def test_no_conflict_between_reasoning_effort_and_extra_body_reasoning(monkeypatch):
+    """When config uses extra_body.reasoning.effort, the top-level reasoning_effort
+    kwarg must NOT also be sent — OpenRouter rejects requests containing both."""
+    wte = {"extra_body": {"reasoning": {"effort": "medium"}}}
+    cfg = _make_app_config(
+        [
+            _make_model(
+                "openrouter-model",
+                supports_thinking=True,
+                supports_reasoning_effort=True,
+                when_thinking_enabled=wte,
+            )
+        ]
+    )
+    _patch_factory(monkeypatch, cfg)
+
+    captured: dict = {}
+
+    class CapturingModel(FakeChatModel):
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            BaseChatModel.__init__(self, **kwargs)
+
+    monkeypatch.setattr(factory_module, "resolve_class", lambda path, base: CapturingModel)
+
+    # Thinking enabled with runtime reasoning_effort (as the lead agent would pass)
+    factory_module.create_chat_model(name="openrouter-model", thinking_enabled=True, reasoning_effort=None)
+
+    # Must NOT have top-level reasoning_effort — only extra_body.reasoning.effort
+    assert "reasoning_effort" not in captured
+    assert captured["extra_body"]["reasoning"]["effort"] == "medium"
+
+
+def test_runtime_reasoning_effort_overrides_extra_body(monkeypatch):
+    """When a runtime reasoning_effort is provided and config uses extra_body.reasoning.effort,
+    the runtime value should override the config value in extra_body (not add a top-level param)."""
+    wte = {"extra_body": {"reasoning": {"effort": "medium"}}}
+    cfg = _make_app_config(
+        [
+            _make_model(
+                "openrouter-model",
+                supports_thinking=True,
+                supports_reasoning_effort=True,
+                when_thinking_enabled=wte,
+            )
+        ]
+    )
+    _patch_factory(monkeypatch, cfg)
+
+    captured: dict = {}
+
+    class CapturingModel(FakeChatModel):
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            BaseChatModel.__init__(self, **kwargs)
+
+    monkeypatch.setattr(factory_module, "resolve_class", lambda path, base: CapturingModel)
+
+    factory_module.create_chat_model(name="openrouter-model", thinking_enabled=True, reasoning_effort="high")
+
+    assert "reasoning_effort" not in captured
+    assert captured["extra_body"]["reasoning"]["effort"] == "high"
+
+
+def test_thinking_disabled_no_conflict_with_extra_body_reasoning(monkeypatch):
+    """When thinking is disabled and config uses extra_body.reasoning.effort,
+    no reasoning_effort kwarg should be sent (since extra_body settings are not merged)."""
+    wte = {"extra_body": {"reasoning": {"effort": "medium"}}}
+    cfg = _make_app_config(
+        [
+            _make_model(
+                "openrouter-model",
+                supports_thinking=True,
+                supports_reasoning_effort=True,
+                when_thinking_enabled=wte,
+            )
+        ]
+    )
+    _patch_factory(monkeypatch, cfg)
+
+    captured: dict = {}
+
+    class CapturingModel(FakeChatModel):
+        def __init__(self, **kwargs):
+            captured.update(kwargs)
+            BaseChatModel.__init__(self, **kwargs)
+
+    monkeypatch.setattr(factory_module, "resolve_class", lambda path, base: CapturingModel)
+
+    factory_module.create_chat_model(name="openrouter-model", thinking_enabled=False)
+
+    # Neither top-level reasoning_effort nor extra_body.reasoning.effort should be present
+    assert "reasoning_effort" not in captured
+    assert "extra_body" not in captured
+
+
 # ---------------------------------------------------------------------------
 # thinking shortcut field
 # ---------------------------------------------------------------------------

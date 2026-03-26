@@ -61,6 +61,24 @@ def create_chat_model(name: str | None = None, thinking_enabled: bool = False, *
     if not model_config.supports_reasoning_effort and "reasoning_effort" in kwargs:
         del kwargs["reasoning_effort"]
 
+    # Prevent conflict between top-level reasoning_effort kwarg and
+    # extra_body.reasoning.effort from when_thinking_enabled config.
+    # OpenRouter (and similar gateways) reject requests that contain both.
+    wte_uses_extra_body_reasoning = bool(effective_wte.get("extra_body", {}).get("reasoning", {}).get("effort"))
+    if wte_uses_extra_body_reasoning:
+        if thinking_enabled:
+            # The effort is already set via extra_body.reasoning.effort in model_settings_from_config.
+            # If a runtime reasoning_effort kwarg was provided, apply it to extra_body instead.
+            runtime_effort = kwargs.pop("reasoning_effort", None)
+            if runtime_effort:
+                eb = model_settings_from_config.setdefault("extra_body", {})
+                eb.setdefault("reasoning", {})["effort"] = runtime_effort
+        else:
+            # Thinking disabled: reasoning_effort:"minimal" was set above via kwargs;
+            # remove any extra_body.reasoning.effort that was NOT merged (thinking_enabled=False
+            # skips the update on line 52), so they don't conflict.
+            kwargs.pop("reasoning_effort", None)
+
     # For Codex Responses API models: map thinking mode to reasoning_effort
     from deerflow.models.openai_codex_provider import CodexChatModel
 
