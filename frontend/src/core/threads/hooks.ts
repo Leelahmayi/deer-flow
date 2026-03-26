@@ -55,6 +55,29 @@ function getStreamErrorMessage(error: unknown): string {
   return "Request failed.";
 }
 
+function logStreamError(
+  error: unknown,
+  context: {
+    threadId: string | null | undefined;
+    messageCount: number;
+    isLoading: boolean;
+  },
+): void {
+  const errorMessage = getStreamErrorMessage(error);
+  const errorDetail =
+    error instanceof Error
+      ? { message: error.message, stack: error.stack, name: error.name }
+      : error;
+  console.error("[DeerFlow] Stream error:", {
+    error: errorDetail,
+    displayMessage: errorMessage,
+    threadId: context.threadId,
+    messageCount: context.messageCount,
+    agentWasActive: context.isLoading,
+    timestamp: new Date().toISOString(),
+  });
+}
+
 export function useThreadStream({
   threadId,
   context,
@@ -173,6 +196,11 @@ export function useThreadStream({
       }
     },
     onError(error) {
+      logStreamError(error, {
+        threadId: threadIdRef.current,
+        messageCount: thread.messages.length,
+        isLoading: thread.isLoading,
+      });
       setOptimisticMessages([]);
       toast.error(getStreamErrorMessage(error));
     },
@@ -206,6 +234,12 @@ export function useThreadStream({
       extraContext?: Record<string, unknown>,
     ) => {
       if (sendInFlightRef.current) {
+        return;
+      }
+      // Guard: if the agent is still actively streaming a response, queue the
+      // user message visually but warn instead of crashing with an internal error.
+      if (thread.isLoading) {
+        toast.info(t.common.agentStillWorking ?? "Agent is still working — please wait for the current response to complete.");
         return;
       }
       sendInFlightRef.current = true;
@@ -365,7 +399,7 @@ export function useThreadStream({
             streamSubgraphs: true,
             streamResumable: true,
             config: {
-              recursion_limit: 1000,
+              recursion_limit: 150,
             },
             context: {
               ...extraContext,
@@ -395,7 +429,7 @@ export function useThreadStream({
         sendInFlightRef.current = false;
       }
     },
-    [thread, _handleOnStart, t.uploads.uploadingFiles, context, queryClient],
+    [thread, _handleOnStart, t.uploads.uploadingFiles, t.common.agentStillWorking, context, queryClient],
   );
 
   // Merge thread with optimistic messages for display

@@ -452,11 +452,17 @@ class ChannelManager:
                     await self._handle_command(msg)
                 else:
                     await self._handle_chat(msg)
-            except Exception:
+            except Exception as exc:
+                thread_id = self.store.get_thread_id(msg.channel_name, msg.chat_id, topic_id=msg.topic_id)
                 logger.exception(
-                    "Error handling message from %s (chat=%s)",
+                    "Error handling message from %s (chat=%s, thread=%s, user=%s, msg_type=%s, text_len=%d): %s",
                     msg.channel_name,
                     msg.chat_id,
+                    thread_id,
+                    msg.user_id,
+                    msg.msg_type.value,
+                    len(msg.text) if msg.text else 0,
+                    exc,
                 )
                 await self._send_error(msg, "An internal error occurred. Please try again.")
 
@@ -603,9 +609,12 @@ class ChannelManager:
                 )
                 last_published_text = latest_text
                 last_publish_at = now
+        except asyncio.TimeoutError as exc:
+            stream_error = exc
+            logger.error("[Manager] streaming timed out: thread_id=%s", thread_id)
         except Exception as exc:
             stream_error = exc
-            logger.exception("[Manager] streaming error: thread_id=%s", thread_id)
+            logger.exception("[Manager] streaming error (type=%s): thread_id=%s", type(exc).__name__, thread_id)
         finally:
             result = last_values if last_values is not None else {"messages": [{"type": "ai", "content": latest_text}]}
             response_text = _extract_response_text(result)

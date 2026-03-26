@@ -23,6 +23,7 @@ export interface Translations {
     public: string;
     custom: string;
     notAvailableInDemoMode: string;
+    agentStillWorking: string;
     loading: string;
     version: string;
     lastUpdated: string;

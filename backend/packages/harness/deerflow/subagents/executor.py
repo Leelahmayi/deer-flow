@@ -341,7 +341,12 @@ class SubagentExecutor:
             result.completed_at = datetime.now()
 
         except Exception as e:
-            logger.exception(f"[trace={self.trace_id}] Subagent {self.config.name} async execution failed")
+            # Count accumulated messages for context overflow diagnosis
+            msg_count = len(result.ai_messages) if result.ai_messages else 0
+            logger.exception(
+                "[trace=%s] Subagent %s async execution failed (ai_messages=%d, error_type=%s): %s",
+                self.trace_id, self.config.name, msg_count, type(e).__name__, e,
+            )
             result.status = SubagentStatus.FAILED
             result.error = str(e)
             result.completed_at = datetime.now()
@@ -436,9 +441,16 @@ class SubagentExecutor:
                         _background_tasks[task_id].ai_messages = exec_result.ai_messages
                 except FuturesTimeoutError:
                     logger.error(f"[trace={self.trace_id}] Subagent {self.config.name} execution timed out after {self.config.timeout_seconds}s")
+                    # Capture any partial result that was accumulated before the timeout
+                    partial_result = None
                     with _background_tasks_lock:
+                        existing = _background_tasks[task_id]
+                        if existing.ai_messages:
+                            partial_result = f"[Timed out after {self.config.timeout_seconds}s with {len(existing.ai_messages)} partial response(s). Last work was in progress when the timeout fired.]"
                         _background_tasks[task_id].status = SubagentStatus.TIMED_OUT
                         _background_tasks[task_id].error = f"Execution timed out after {self.config.timeout_seconds} seconds"
+                        if partial_result:
+                            _background_tasks[task_id].result = partial_result
                         _background_tasks[task_id].completed_at = datetime.now()
                     # Cancel the future (best effort - may not stop the actual execution)
                     execution_future.cancel()

@@ -15,6 +15,27 @@ logger = logging.getLogger(__name__)
 
 _MISSING_TOOL_CALL_ID = "missing_tool_call_id"
 
+# Maximum characters for a single tool result (~2000 tokens).
+# Prevents individual web fetch/search results from bloating the context.
+MAX_TOOL_RESULT_CHARS = 8000
+
+
+def _truncate_tool_result(result: ToolMessage | Command) -> ToolMessage | Command:
+    """Truncate oversized tool result content to prevent context overflow."""
+    if not isinstance(result, ToolMessage):
+        return result
+    content = result.content
+    if isinstance(content, str) and len(content) > MAX_TOOL_RESULT_CHARS:
+        truncated = content[:MAX_TOOL_RESULT_CHARS] + "\n... [result truncated to save context space]"
+        logger.info("Truncated tool result for %s from %d to %d chars", getattr(result, "name", "unknown"), len(content), len(truncated))
+        return ToolMessage(
+            content=truncated,
+            tool_call_id=result.tool_call_id,
+            name=getattr(result, "name", "unknown"),
+            status=getattr(result, "status", None),
+        )
+    return result
+
 
 class ToolErrorHandlingMiddleware(AgentMiddleware[AgentState]):
     """Convert tool exceptions into error ToolMessages so the run can continue."""
@@ -55,7 +76,8 @@ class ToolErrorHandlingMiddleware(AgentMiddleware[AgentState]):
         handler: Callable[[ToolCallRequest], ToolMessage | Command],
     ) -> ToolMessage | Command:
         try:
-            return handler(request)
+            result = handler(request)
+            return _truncate_tool_result(result)
         except GraphBubbleUp:
             # Preserve LangGraph control-flow signals (interrupt/pause/resume).
             raise
@@ -70,7 +92,8 @@ class ToolErrorHandlingMiddleware(AgentMiddleware[AgentState]):
         handler: Callable[[ToolCallRequest], Awaitable[ToolMessage | Command]],
     ) -> ToolMessage | Command:
         try:
-            return await handler(request)
+            result = await handler(request)
+            return _truncate_tool_result(result)
         except GraphBubbleUp:
             # Preserve LangGraph control-flow signals (interrupt/pause/resume).
             raise

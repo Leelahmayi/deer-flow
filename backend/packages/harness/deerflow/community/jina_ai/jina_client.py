@@ -5,6 +5,10 @@ import requests
 
 logger = logging.getLogger(__name__)
 
+# Maximum characters to return from a web fetch to prevent context overflow.
+# ~8000 chars ≈ ~2000 tokens, keeping individual tool results manageable.
+MAX_FETCH_CHARS = 8000
+
 
 class JinaClient:
     def crawl(self, url: str, return_format: str = "html", timeout: int = 10) -> str:
@@ -31,7 +35,11 @@ class JinaClient:
                 logger.error(error_message)
                 return f"Error: {error_message}"
 
-            return response.text
+            text = response.text
+            if len(text) > MAX_FETCH_CHARS:
+                logger.info("Jina response truncated from %d to %d chars for url: %s", len(text), MAX_FETCH_CHARS, url)
+                text = text[:MAX_FETCH_CHARS] + f"\n... [truncated, full content at {url}]"
+            return text
         except Exception as e:
             error_message = f"Request to Jina API failed: {str(e)}"
             logger.error(error_message)

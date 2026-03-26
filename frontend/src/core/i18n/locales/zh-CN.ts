@@ -34,6 +34,7 @@ export const zhCN: Translations = {
     public: "公共",
     custom: "自定义",
     notAvailableInDemoMode: "在演示模式下不可用",
+    agentStillWorking: "智能体仍在工作中，请等待当前响应完成。",
     loading: "加载中...",
     version: "版本",
     lastUpdated: "最后更新",

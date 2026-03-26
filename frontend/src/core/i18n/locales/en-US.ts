@@ -34,6 +34,7 @@ export const enUS: Translations = {
     public: "Public",
     custom: "Custom",
     notAvailableInDemoMode: "Not available in demo mode",
+    agentStillWorking: "Agent is still working — please wait for the current response to complete.",
     loading: "Loading...",
     version: "Version",
     lastUpdated: "Last updated",
