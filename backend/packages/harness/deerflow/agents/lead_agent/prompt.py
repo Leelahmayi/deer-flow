@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from deerflow.agents.tool_instructions import TOOL_USAGE_GUIDE
 from deerflow.config.agents_config import load_agent_soul
 from deerflow.skills import load_skills
 
@@ -239,63 +240,7 @@ You: "Deploying to staging..." [proceed]
 
 {subagent_section}
 
-<tool_usage_guide>
-**CRITICAL: Every sandbox tool requires a `description` parameter as the FIRST argument. You MUST include it.**
-
-**write_file** — Write text content to a file:
-```
-write_file(
-    description="saving hoodie ground truth data",
-    path="/mnt/user-data/workspace/docs/ground-truth/hoodie.json",
-    content="<file contents here>"
-)
-```
-Required parameters (in order): `description`, `path`, `content`
-
-**bash** — Execute a bash command:
-```
-bash(
-    description="listing workspace files",
-    command="ls -la /mnt/user-data/workspace"
-)
-```
-Required parameters (in order): `description`, `command`
-
-**read_file** — Read a text file:
-```
-read_file(
-    description="reading config file",
-    path="/mnt/user-data/workspace/config.json"
-)
-```
-Required parameters (in order): `description`, `path`
-
-**str_replace** — Replace text in a file:
-```
-str_replace(
-    description="fixing typo in readme",
-    path="/mnt/user-data/workspace/README.md",
-    old_str="helo world",
-    new_str="hello world"
-)
-```
-Required parameters (in order): `description`, `path`, `old_str`, `new_str`
-
-**ls** — List directory contents:
-```
-ls(
-    description="checking project structure",
-    path="/mnt/user-data/workspace"
-)
-```
-Required parameters (in order): `description`, `path`
-
-**COMMON MISTAKES TO AVOID:**
-- ❌ DO NOT use `filename` — the parameter is called `path`
-- ❌ DO NOT omit `description` — it is REQUIRED as the first parameter on every tool
-- ❌ DO NOT use relative paths — always use absolute paths starting with `/mnt/user-data/`
-- ✅ ALWAYS provide `description` first, then the other parameters in order
-</tool_usage_guide>
+{tool_usage_guide}
 
 <working_directory existed="true">
 - User uploads: `/mnt/user-data/uploads` - Files uploaded by the user (automatically listed in context)
@@ -314,9 +259,13 @@ Example: `github_create_or_update_file(owner='Leelahmayi', repo='undone', path='
 </working_directory>
 
 <response_style>
-- Clear and Concise: Avoid over-formatting unless requested
-- Natural Tone: Use paragraphs and prose, not bullet points by default
-- Action-Oriented: Focus on delivering results, not explaining processes
+- Lead with a concise summary (2-3 sentences) before any detail
+- Use clean markdown: headers for sections, no walls of text
+- NEVER dump raw file contents into the chat — report filename, path, size, and a brief description instead
+- For code changes: show only the function/method signatures that changed, not full implementations
+- Only include "Next steps" if the user explicitly asked for recommendations
+- NEVER use filler phrases like "As an AI assistant", "I'd be happy to", "Let me help you with that"
+- Be direct and action-oriented: say what you did, not what you're about to do
 </response_style>
 
 <citations>
@@ -547,6 +496,7 @@ def apply_prompt_template(subagent_enabled: bool = False, max_concurrent_subagen
         subagent_section=subagent_section,
         subagent_reminder=subagent_reminder,
         subagent_thinking=subagent_thinking,
+        tool_usage_guide=TOOL_USAGE_GUIDE,
     )
 
     return prompt + f"\n<current_date>{datetime.now().strftime('%Y-%m-%d, %A')}</current_date>"

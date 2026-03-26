@@ -29,6 +29,10 @@ import {
   findToolCallResult,
 } from "@/core/messages/utils";
 import { useRehypeSplitWordsIntoSpans } from "@/core/rehype";
+import {
+  getFileExtensionDisplayName,
+  getFileName,
+} from "@/core/utils/files";
 import { extractTitleFromMarkdown } from "@/core/utils/markdown";
 import { env } from "@/env";
 import { cn } from "@/lib/utils";
@@ -335,6 +339,8 @@ function ToolCall({
       description = t.toolCalls.writeFile;
     }
     const path: string | undefined = (args as { path: string })?.path;
+    const content: string | undefined = (args as { content: string })
+      ?.content;
     if (isLoading && isLast && autoOpen && autoSelect && path) {
       setTimeout(() => {
         const url = new URL(
@@ -347,6 +353,19 @@ function ToolCall({
         setOpen(true);
       }, 100);
     }
+
+    // Compute display info
+    const fileName = path ? getFileName(path) : undefined;
+    const fileType = path
+      ? getFileExtensionDisplayName(path)
+      : undefined;
+    const contentSize = content ? new Blob([content]).size : 0;
+    const sizeStr =
+      contentSize < 1024
+        ? `${contentSize} B`
+        : contentSize < 1024 * 1024
+          ? `${(contentSize / 1024).toFixed(1)} KB`
+          : `${(contentSize / (1024 * 1024)).toFixed(1)} MB`;
 
     return (
       <ChainOfThoughtStep
@@ -364,9 +383,19 @@ function ToolCall({
         }}
       >
         {path && (
-          <ChainOfThoughtSearchResult className="cursor-pointer">
-            {path}
-          </ChainOfThoughtSearchResult>
+          <div className="bg-card border-border flex items-center gap-3 rounded-lg border px-3 py-2 shadow-sm">
+            <NotebookPenIcon className="text-muted-foreground size-4 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <div className="text-foreground truncate text-xs font-medium">
+                {fileName}
+              </div>
+              <div className="text-muted-foreground text-xs">
+                {[fileType, contentSize > 0 ? sizeStr : null]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </div>
+            </div>
+          </div>
         )}
       </ChainOfThoughtStep>
     );

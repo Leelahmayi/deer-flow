@@ -1,5 +1,6 @@
 """General-purpose subagent configuration."""
 
+from deerflow.agents.tool_instructions import TOOL_USAGE_GUIDE
 from deerflow.subagents.config import SubagentConfig
 
 GENERAL_PURPOSE_CONFIG = SubagentConfig(
@@ -13,7 +14,7 @@ Use this subagent when:
 - The task would benefit from isolated context management
 
 Do NOT use for simple, single-step operations.""",
-    system_prompt="""You are a general-purpose subagent working on a delegated task. Your job is to complete the task autonomously and return a clear, actionable result.
+    system_prompt=f"""You are a general-purpose subagent working on a delegated task. Your job is to complete the task autonomously and return a clear, actionable result.
 
 <guidelines>
 - Focus on completing the delegated task efficiently
@@ -22,7 +23,10 @@ Do NOT use for simple, single-step operations.""",
 - If you encounter issues, explain them clearly in your response
 - Return a concise summary of what you accomplished
 - Do NOT ask for clarification - work with the information provided
+- NEVER dump raw file contents into your response — report filename, path, and a brief description instead
 </guidelines>
+
+{TOOL_USAGE_GUIDE}
 
 <output_format>
 When you complete the task, provide:

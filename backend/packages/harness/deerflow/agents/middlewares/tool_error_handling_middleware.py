@@ -19,6 +19,17 @@ _MISSING_TOOL_CALL_ID = "missing_tool_call_id"
 class ToolErrorHandlingMiddleware(AgentMiddleware[AgentState]):
     """Convert tool exceptions into error ToolMessages so the run can continue."""
 
+    # Maps known exception types to user-friendly suggestions
+    _RECOVERY_HINTS: dict[str, str] = {
+        "FileNotFoundError": "Check the file path exists and use absolute paths starting with /mnt/user-data/.",
+        "PermissionError": "The file or directory is not writable. Try a different path under /mnt/user-data/workspace/.",
+        "IsADirectoryError": "The path points to a directory, not a file. Provide the full file path including filename.",
+        "SandboxError": "The sandbox environment encountered an issue. Try the operation again.",
+        "SandboxNotFoundError": "The sandbox is not available. The system will retry automatically.",
+        "ValidationError": "Check that all required parameters are provided with correct names (description, path, content).",
+        "TypeError": "A required parameter may be missing or has the wrong type. Check parameter names: description, path, content, command.",
+    }
+
     def _build_error_message(self, request: ToolCallRequest, exc: Exception) -> ToolMessage:
         tool_name = str(request.tool_call.get("name") or "unknown_tool")
         tool_call_id = str(request.tool_call.get("id") or _MISSING_TOOL_CALL_ID)
@@ -26,7 +37,10 @@ class ToolErrorHandlingMiddleware(AgentMiddleware[AgentState]):
         if len(detail) > 500:
             detail = detail[:497] + "..."
 
-        content = f"Error: Tool '{tool_name}' failed with {exc.__class__.__name__}: {detail}. Continue with available context, or choose an alternative tool."
+        exc_type = exc.__class__.__name__
+        hint = self._RECOVERY_HINTS.get(exc_type, "Try an alternative approach or check the parameters.")
+
+        content = f"Error: Tool '{tool_name}' failed — {detail}\nRecovery: {hint}"
         return ToolMessage(
             content=content,
             tool_call_id=tool_call_id,

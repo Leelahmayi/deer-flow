@@ -1,8 +1,12 @@
+import logging
+import os
 import re
 from pathlib import Path
 
 from langchain.tools import ToolRuntime, tool
 from langgraph.typing import ContextT
+
+logger = logging.getLogger(__name__)
 
 from deerflow.agents.thread_state import ThreadDataState, ThreadState
 from deerflow.config.paths import VIRTUAL_PATH_PREFIX
@@ -667,12 +671,27 @@ def write_file_tool(
         sandbox = ensure_sandbox_initialized(runtime)
         ensure_thread_directories_exist(runtime)
         requested_path = path
+        resolved_path = path
         if is_local_sandbox(runtime):
             thread_data = get_thread_data(runtime)
             validate_local_tool_path(path, thread_data)
-            path = _resolve_and_validate_user_data_path(path, thread_data)
-        sandbox.write_file(path, content, append)
-        return "OK"
+            resolved_path = _resolve_and_validate_user_data_path(path, thread_data)
+        sandbox.write_file(resolved_path, content, append)
+
+        # Verify the file was written and report size
+        try:
+            file_size = os.path.getsize(resolved_path)
+            logger.info("write_file OK: path=%s size=%d bytes", requested_path, file_size)
+            if file_size < 1024:
+                size_str = f"{file_size} bytes"
+            elif file_size < 1024 * 1024:
+                size_str = f"{file_size / 1024:.1f} KB"
+            else:
+                size_str = f"{file_size / (1024 * 1024):.1f} MB"
+            return f"OK — wrote {size_str} to {requested_path}"
+        except OSError:
+            # Verification failed but write succeeded (e.g., remote sandbox)
+            return "OK"
     except SandboxError as e:
         return f"Error: {e}"
     except PermissionError:

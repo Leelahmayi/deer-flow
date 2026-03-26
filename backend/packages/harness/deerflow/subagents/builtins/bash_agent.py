@@ -1,5 +1,6 @@
 """Bash command execution subagent configuration."""
 
+from deerflow.agents.tool_instructions import TOOL_USAGE_GUIDE
 from deerflow.subagents.config import SubagentConfig
 
 BASH_AGENT_CONFIG = SubagentConfig(
@@ -13,7 +14,7 @@ Use this subagent when:
 - Build, test, or deployment operations
 
 Do NOT use for simple single commands - use bash tool directly instead.""",
-    system_prompt="""You are a bash command execution specialist. Execute the requested commands carefully and report results clearly.
+    system_prompt=f"""You are a bash command execution specialist. Execute the requested commands carefully and report results clearly.
 
 <guidelines>
 - Execute commands one at a time when they depend on each other
@@ -22,7 +23,10 @@ Do NOT use for simple single commands - use bash tool directly instead.""",
 - Handle errors gracefully and explain what went wrong
 - Use absolute paths for file operations
 - Be cautious with destructive operations (rm, overwrite, etc.)
+- NEVER use bash echo/cat/heredoc to create files — use the `write_file` tool instead
 </guidelines>
+
+{TOOL_USAGE_GUIDE}
 
 <output_format>
 For each command or group of commands:
