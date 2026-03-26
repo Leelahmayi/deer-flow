@@ -17,7 +17,7 @@ from typing import override
 from langchain.agents import AgentState
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelCallResult, ModelRequest, ModelResponse
-from langchain_core.messages import ToolMessage
+from langchain_core.messages import AIMessage, ToolMessage
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +30,15 @@ DEFAULT_MAX_CONTEXT_TOKENS = 100_000
 # When truncating old tool results, cap each at this many characters
 TRUNCATED_TOOL_RESULT_MAX_CHARS = 500
 
+# When truncating old AI messages (second pass), cap each at this many characters
+TRUNCATED_AI_MESSAGE_MAX_CHARS = 1000
+
 # Keep the most recent N messages untouched (never truncate recent context)
 KEEP_RECENT_MESSAGES = 20
+
+# Log context size diagnostics every N model calls (avoid log spam)
+_DIAGNOSTIC_LOG_INTERVAL = 5
+_diagnostic_call_count = 0
 
 
 def _estimate_tokens(text: str) -> int:
@@ -58,29 +65,43 @@ def _estimate_message_tokens(msg) -> int:
 
 
 def _truncate_tool_messages(messages: list, max_tokens: int) -> list | None:
-    """Truncate old tool result messages if total context exceeds max_tokens.
+    """Truncate old messages if total context exceeds max_tokens.
 
-    Returns a new message list with old ToolMessage content truncated,
+    Pass 1: truncate old ToolMessages (largest savings).
+    Pass 2: if still over budget, truncate old AIMessages too.
+
+    Returns a new message list with old message content truncated,
     or None if no truncation was needed.
     """
+    global _diagnostic_call_count
     total_tokens = sum(_estimate_message_tokens(m) for m in messages)
+
+    # Periodic diagnostic logging (even when not truncating)
+    _diagnostic_call_count += 1
+    if _diagnostic_call_count % _DIAGNOSTIC_LOG_INTERVAL == 0:
+        usage_pct = (total_tokens / max_tokens * 100) if max_tokens > 0 else 0
+        logger.info(
+            "Context guard diagnostic: ~%d tokens / %d limit (%.0f%%), %d messages",
+            total_tokens, max_tokens, usage_pct, len(messages),
+        )
 
     if total_tokens <= max_tokens:
         return None
 
     logger.warning(
-        "Context guard: estimated %d tokens exceeds limit %d, truncating old tool results",
+        "Context guard: estimated %d tokens exceeds limit %d, truncating old messages",
         total_tokens, max_tokens,
     )
 
-    # Work through messages oldest-first, truncating ToolMessages
-    # but preserving the most recent KEEP_RECENT_MESSAGES
     cutoff = max(0, len(messages) - KEEP_RECENT_MESSAGES)
     new_messages = list(messages)
     tokens_saved = 0
     needed_savings = total_tokens - max_tokens
 
+    # Pass 1: truncate old ToolMessages (most effective — tool results are largest)
     for i in range(cutoff):
+        if tokens_saved >= needed_savings:
+            break
         msg = new_messages[i]
         if not isinstance(msg, ToolMessage):
             continue
@@ -91,7 +112,6 @@ def _truncate_tool_messages(messages: list, max_tokens: int) -> list | None:
         if original_tokens <= TRUNCATED_TOOL_RESULT_MAX_CHARS // _CHARS_PER_TOKEN:
             continue
 
-        # Truncate the content
         truncated = content[:TRUNCATED_TOOL_RESULT_MAX_CHARS] + "\n... [content truncated to save context space]"
         new_msg = ToolMessage(
             content=truncated,
@@ -102,15 +122,39 @@ def _truncate_tool_messages(messages: list, max_tokens: int) -> list | None:
         new_messages[i] = new_msg
         tokens_saved += original_tokens - _estimate_tokens(truncated)
 
-        if tokens_saved >= needed_savings:
-            break
+    # Pass 2: if still over budget, truncate old AIMessages
+    if tokens_saved < needed_savings:
+        for i in range(cutoff):
+            if tokens_saved >= needed_savings:
+                break
+            msg = new_messages[i]
+            if not isinstance(msg, AIMessage):
+                continue
+
+            content = msg.content if isinstance(msg.content, str) else str(msg.content)
+            original_tokens = _estimate_tokens(content)
+
+            if original_tokens <= TRUNCATED_AI_MESSAGE_MAX_CHARS // _CHARS_PER_TOKEN:
+                continue
+
+            truncated = content[:TRUNCATED_AI_MESSAGE_MAX_CHARS] + "\n... [content truncated to save context space]"
+            # Preserve tool_calls and other metadata on the AIMessage
+            new_msg = msg.model_copy(update={"content": truncated})
+            new_messages[i] = new_msg
+            tokens_saved += original_tokens - _estimate_tokens(truncated)
 
     if tokens_saved > 0:
         new_total = total_tokens - tokens_saved
         logger.info(
-            "Context guard: truncated old tool results, saved ~%d tokens (now ~%d tokens)",
+            "Context guard: truncated old messages, saved ~%d tokens (now ~%d tokens)",
             tokens_saved, new_total,
         )
+        if new_total > max_tokens:
+            logger.warning(
+                "Context guard: still over budget after truncation (~%d tokens > %d limit). "
+                "Recent messages alone may exceed the context window.",
+                new_total, max_tokens,
+            )
         return new_messages
 
     return None

@@ -166,10 +166,15 @@ class SubagentExecutor:
         model_name = _get_model_name(self.config, self.parent_model)
         model = create_chat_model(name=model_name, thinking_enabled=False)
 
+        from deerflow.agents.middlewares.context_guard_middleware import ContextGuardMiddleware
         from deerflow.agents.middlewares.tool_error_handling_middleware import build_subagent_runtime_middlewares
 
         # Reuse shared middleware composition with lead agent.
         middlewares = build_subagent_runtime_middlewares(lazy_init=True)
+
+        # Subagents doing many web searches can also overflow context.
+        # Use a smaller budget since subagents should be focused tasks.
+        middlewares.append(ContextGuardMiddleware(max_context_tokens=60_000))
 
         return create_agent(
             model=model,
@@ -344,8 +349,9 @@ class SubagentExecutor:
             # Count accumulated messages for context overflow diagnosis
             msg_count = len(result.ai_messages) if result.ai_messages else 0
             logger.exception(
-                "[trace=%s] Subagent %s async execution failed (ai_messages=%d, error_type=%s): %s",
-                self.trace_id, self.config.name, msg_count, type(e).__name__, e,
+                "[trace=%s] Subagent %s async execution failed "
+                "(ai_messages=%d, error_type=%s, task_prompt=%.200r): %s",
+                self.trace_id, self.config.name, msg_count, type(e).__name__, task, e,
             )
             result.status = SubagentStatus.FAILED
             result.error = str(e)

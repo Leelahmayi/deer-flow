@@ -18,13 +18,20 @@ DEFAULT_LANGGRAPH_URL = "http://localhost:2024"
 DEFAULT_GATEWAY_URL = "http://localhost:8001"
 DEFAULT_ASSISTANT_ID = "lead_agent"
 
-DEFAULT_RUN_CONFIG: dict[str, Any] = {"recursion_limit": 100}
+DEFAULT_RUN_CONFIG: dict[str, Any] = {"recursion_limit": 150}
 DEFAULT_RUN_CONTEXT: dict[str, Any] = {
     "thinking_enabled": True,
     "is_plan_mode": False,
     "subagent_enabled": False,
 }
 STREAM_UPDATE_MIN_INTERVAL_SECONDS = 0.35
+
+# Maximum time (seconds) to wait for a non-streaming agent run before timing out.
+# Prevents indefinite hangs when the LangGraph server stops responding.
+AGENT_RUN_TIMEOUT_SECONDS = 600
+
+# Maximum time (seconds) for a streaming agent run.
+AGENT_STREAM_TIMEOUT_SECONDS = 600
 
 CHANNEL_CAPABILITIES = {
     "feishu": {"supports_streaming": True},
@@ -454,12 +461,18 @@ class ChannelManager:
                     await self._handle_chat(msg)
             except Exception as exc:
                 thread_id = self.store.get_thread_id(msg.channel_name, msg.chat_id, topic_id=msg.topic_id)
+                # Resolve assistant for diagnostics (best-effort, don't mask the real error)
+                try:
+                    assistant_id, _, _ = self._resolve_run_params(msg, thread_id or "")
+                except Exception:
+                    assistant_id = "unknown"
                 logger.exception(
-                    "Error handling message from %s (chat=%s, thread=%s, user=%s, msg_type=%s, text_len=%d): %s",
+                    "Error handling message from %s (chat=%s, thread=%s, user=%s, assistant=%s, msg_type=%s, text_len=%d): %s",
                     msg.channel_name,
                     msg.chat_id,
                     thread_id,
                     msg.user_id,
+                    assistant_id,
                     msg.msg_type.value,
                     len(msg.text) if msg.text else 0,
                     exc,
@@ -511,13 +524,21 @@ class ChannelManager:
             return
 
         logger.info("[Manager] invoking runs.wait(thread_id=%s, text=%r)", thread_id, msg.text[:100])
-        result = await client.runs.wait(
-            thread_id,
-            assistant_id,
-            input={"messages": [{"role": "human", "content": msg.text}]},
-            config=run_config,
-            context=run_context,
-        )
+        try:
+            result = await asyncio.wait_for(
+                client.runs.wait(
+                    thread_id,
+                    assistant_id,
+                    input={"messages": [{"role": "human", "content": msg.text}]},
+                    config=run_config,
+                    context=run_context,
+                ),
+                timeout=AGENT_RUN_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            logger.error("[Manager] runs.wait timed out after %ds: thread_id=%s", AGENT_RUN_TIMEOUT_SECONDS, thread_id)
+            await self._send_error(msg, "The request timed out. Please try again with a simpler query.")
+            return
 
         response_text = _extract_response_text(result)
         artifacts = _extract_artifacts(result)
@@ -569,46 +590,47 @@ class ChannelManager:
         stream_error: BaseException | None = None
 
         try:
-            async for chunk in client.runs.stream(
-                thread_id,
-                assistant_id,
-                input={"messages": [{"role": "human", "content": msg.text}]},
-                config=run_config,
-                context=run_context,
-                stream_mode=["messages-tuple", "values"],
-            ):
-                event = getattr(chunk, "event", "")
-                data = getattr(chunk, "data", None)
+            async with asyncio.timeout(AGENT_STREAM_TIMEOUT_SECONDS):
+                async for chunk in client.runs.stream(
+                    thread_id,
+                    assistant_id,
+                    input={"messages": [{"role": "human", "content": msg.text}]},
+                    config=run_config,
+                    context=run_context,
+                    stream_mode=["messages-tuple", "values"],
+                ):
+                    event = getattr(chunk, "event", "")
+                    data = getattr(chunk, "data", None)
 
-                if event == "messages-tuple":
-                    accumulated_text, current_message_id = _accumulate_stream_text(streamed_buffers, current_message_id, data)
-                    if accumulated_text:
-                        latest_text = accumulated_text
-                elif event == "values" and isinstance(data, (dict, list)):
-                    last_values = data
-                    snapshot_text = _extract_response_text(data)
-                    if snapshot_text:
-                        latest_text = snapshot_text
+                    if event == "messages-tuple":
+                        accumulated_text, current_message_id = _accumulate_stream_text(streamed_buffers, current_message_id, data)
+                        if accumulated_text:
+                            latest_text = accumulated_text
+                    elif event == "values" and isinstance(data, (dict, list)):
+                        last_values = data
+                        snapshot_text = _extract_response_text(data)
+                        if snapshot_text:
+                            latest_text = snapshot_text
 
-                if not latest_text or latest_text == last_published_text:
-                    continue
+                    if not latest_text or latest_text == last_published_text:
+                        continue
 
-                now = time.monotonic()
-                if last_published_text and now - last_publish_at < STREAM_UPDATE_MIN_INTERVAL_SECONDS:
-                    continue
+                    now = time.monotonic()
+                    if last_published_text and now - last_publish_at < STREAM_UPDATE_MIN_INTERVAL_SECONDS:
+                        continue
 
-                await self.bus.publish_outbound(
-                    OutboundMessage(
-                        channel_name=msg.channel_name,
-                        chat_id=msg.chat_id,
-                        thread_id=thread_id,
-                        text=latest_text,
-                        is_final=False,
-                        thread_ts=msg.thread_ts,
+                    await self.bus.publish_outbound(
+                        OutboundMessage(
+                            channel_name=msg.channel_name,
+                            chat_id=msg.chat_id,
+                            thread_id=thread_id,
+                            text=latest_text,
+                            is_final=False,
+                            thread_ts=msg.thread_ts,
+                        )
                     )
-                )
-                last_published_text = latest_text
-                last_publish_at = now
+                    last_published_text = latest_text
+                    last_publish_at = now
         except asyncio.TimeoutError as exc:
             stream_error = exc
             logger.error("[Manager] streaming timed out: thread_id=%s", thread_id)
